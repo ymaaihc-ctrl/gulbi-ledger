@@ -1,5 +1,5 @@
 // 앱 파일을 캐시해 오프라인에서도 열리게 한다. 사용자 데이터는 IndexedDB에 있어 캐시와 무관하다.
-const CACHE = 'gulbi-v2';
+const CACHE = 'gulbi-v3';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'calc.js', 'db.js', 'mascot.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 

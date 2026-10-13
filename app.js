@@ -2,7 +2,7 @@ import * as C from './calc.js';
 import * as DB from './db.js';
 import { mascot, lineFor } from './mascot.js';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.1.1';
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
@@ -50,7 +50,8 @@ function bindChrome() {
   $('#fab').addEventListener('click', () => openSheet());
   document.addEventListener('click', onAction);
   document.addEventListener('keydown', onKeypadKey);
-  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; if (ui.tab === 'settings' || ui.tab === 'onboarding') render(); });
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; });
+  window.addEventListener('appinstalled', () => { installPrompt = null; toast('설치됐어요! 홈 화면의 굴비를 눌러 열어주세요'); render(); });
 }
 
 function go(tab) {
@@ -76,20 +77,34 @@ function decodeSetup(b64) {
   return { plan, settings: data.settings || {} };
 }
 
+function encodeSetup() {
+  const data = { plan: state.plan.map(({ name, amount, kind, payDay }) => ({ name, amount, kind, payDay })), settings: { monthStartDay: state.settings.monthStartDay } };
+  const bytes = new TextEncoder().encode(JSON.stringify(data));
+  const b64 = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `${location.origin}${location.pathname}#setup=${b64}`;
+}
+
+const setupCodeOf = text => (String(text).trim().match(/#setup=([\w\-+/=]+)/) || String(text).trim().match(/^([\w\-+/=]{20,})$/) || [])[1];
+
 async function handleSetupLink() {
   const m = location.hash.match(/^#setup=([\w\-+/=]+)$/);
   if (!m) return;
   history.replaceState(null, '', location.pathname + location.search);
+  await applySetup(m[1]);
+}
+
+async function applySetup(code) {
   let data;
-  try { data = decodeSetup(m[1]); } catch { toast('설정 링크가 올바르지 않아요'); return; }
+  try { data = decodeSetup(code); } catch { toast('설정 링크가 올바르지 않아요'); return false; }
   if (state.plan.length) {
     const ok = await confirmModal({ title: '계획을 바꿀까요?', body: '설정 링크에 담긴 월 계획으로 지금 계획을 바꿔요. 지금까지의 기록은 그대로 남아요.', ok: '계획 바꾸기' });
-    if (!ok) return;
+    if (!ok) return false;
   }
   await savePlan(data.plan);
   const sd = Number(data.settings.monthStartDay);
   if (sd >= 1 && sd <= 28) await setSetting('monthStartDay', sd);
   toast('월 계획을 불러왔어요. 반가워요!');
+  return true;
 }
 
 /* ---------- 저장 ---------- */
@@ -159,8 +174,10 @@ function renderOnboarding() {
       <li><div><b>한 달 계획 적기</b><br><span class="small muted">보험료, 적금, 투자, 생활비처럼 매달 나가는 돈을 적어요.</span></div></li>
       <li><div><b>쓸 때마다 + 기록</b><br><span class="small muted">월급·수익·지출 중 하나 고르고 금액만 누르면 끝!</span></div></li>
     </ol>
-    ${installPrompt ? '<button class="btn gold block" data-act="install" type="button">앱으로 설치하기</button><div style="height:8px"></div>' : ''}
-    <button class="btn primary block" data-act="start-plan" type="button">한 달 계획 적으러 가기</button>
+    ${isStandalone() ? '' : '<button class="btn gold block" data-act="install" type="button">📲 앱으로 설치하기</button><div style="height:8px"></div>'}
+    <button class="btn primary block" data-act="paste-setup" type="button">🔗 받은 설정 링크 붙여넣기</button>
+    <div style="height:8px"></div>
+    <button class="btn ghost block" data-act="start-plan" type="button">한 달 계획 직접 적기</button>
     <div style="height:8px"></div>
     <button class="btn ghost block" data-act="import" type="button">백업 파일로 시작하기</button>
   </div>`;
@@ -489,7 +506,7 @@ function renderSettings(t, s) {
   const draft = ui.planDraft;
   const trashCount = state.entries.filter(e => e.deletedAt).length;
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  const standalone = isStandalone();
 
   $('#view-settings').innerHTML = `
   <div class="card">
@@ -527,13 +544,14 @@ function renderSettings(t, s) {
     <h2>내 데이터</h2>
     <div class="setting-row"><div><b>백업 내보내기</b><div class="small muted">${state.settings.lastBackupAt ? `마지막 백업 ${fmtDate(state.settings.lastBackupAt.slice(0, 10))}` : '아직 백업한 적 없어요'}</div></div><button class="btn small gold" data-act="export" type="button">내보내기</button></div>
     <div class="setting-row"><div><b>백업 불러오기</b><div class="small muted">지금 데이터가 백업 내용으로 바뀌어요</div></div><button class="btn small" data-act="import" type="button">불러오기</button></div>
+    <div class="setting-row"><div><b>계획 링크 복사</b><div class="small muted">다른 브라우저·설치한 앱·새 폰에 한 달 계획만 옮겨요</div></div><button class="btn small" data-act="copy-setup" type="button">복사</button></div>
     <div class="setting-row"><div><b>휴지통</b><div class="small muted">지운 기록 ${trashCount}건 · 30일 뒤 자동 삭제</div></div><button class="btn small" data-act="trash" type="button">열기</button></div>
     <div class="setting-row"><div><b>전체 초기화</b><div class="small muted">모든 계획·기록·굴비를 지워요</div></div><button class="btn small danger" data-act="reset" type="button">초기화</button></div>
   </div>
 
   ${standalone ? '' : `<div class="card"><h2>앱으로 설치</h2>
     <p class="small muted" style="margin-top:-4px">${isIOS ? '사파리 아래 공유 버튼 → ‘홈 화면에 추가’를 눌러주세요. 아이폰은 설치하지 않으면 7일 넘게 안 열 때 기록이 지워질 수 있어요.' : '설치하면 앱처럼 열리고 기록이 더 안전하게 남아요.'}</p>
-    ${installPrompt ? '<button class="btn gold block" data-act="install" type="button">앱으로 설치하기</button>' : ''}</div>`}
+    <button class="btn gold block" data-act="install" type="button">📲 앱으로 설치하기</button></div>`}
 
   <div class="card">
     <details class="policy">
@@ -583,7 +601,9 @@ async function onAction(ev) {
 
   switch (act) {
     case 'start-plan': go('settings'); break;
-    case 'install': installPrompt?.prompt(); installPrompt = null; break;
+    case 'install': await installApp(); break;
+    case 'paste-setup': await pasteSetup(); break;
+    case 'copy-setup': await copySetup(); break;
     case 'dismiss-tip': await setSetting('tipDismissed', true); render(); break;
     case 'show-tip': await setSetting('tipDismissed', false); go('home'); break;
     case 'add-salary': openSheet(null, 'salary'); break;
@@ -932,6 +952,116 @@ function investWarning(entry, extraBefore) {
     dlg.addEventListener('close', () => resolve(result), { once: true });
     dlg.showModal();
   });
+}
+
+/* ---------- 앱 설치 ---------- */
+
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+function platform() {
+  const ua = navigator.userAgent;
+  const ios = /iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const inApp = (ua.match(/KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|Line\/|DaumApps|everytimeApp/i) || [])[0];
+  return {
+    ios, android: /android/i.test(ua), inApp: inApp ? (/KAKAOTALK/i.test(inApp) ? '카카오톡' : '앱') : null,
+    samsung: /SamsungBrowser/i.test(ua), iosChrome: ios && /CriOS/i.test(ua),
+  };
+}
+
+async function installApp() {
+  // 크롬·엣지·안드로이드: 브라우저 설치 창을 바로 띄운다
+  if (installPrompt) {
+    const ev = installPrompt;
+    installPrompt = null;
+    try {
+      await ev.prompt();
+      const { outcome } = await ev.userChoice;
+      if (outcome !== 'accepted') toast('설치를 취소했어요. 나중에 다시 눌러도 돼요');
+    } catch { showInstallGuide(); }
+    return;
+  }
+  // 아이폰·카톡 같은 인앱 브라우저·삼성 인터넷: 자동 설치 창이 없어서 순서를 안내한다
+  showInstallGuide();
+}
+
+function showInstallGuide() {
+  const pf = platform();
+  let title = '홈 화면에 추가하기', steps;
+  if (pf.inApp) {
+    title = `${pf.inApp} 안에서는 설치가 안 돼요`;
+    steps = pf.ios
+      ? ['오른쪽 아래 <b>⋯</b> 또는 공유 버튼을 눌러요', '<b>Safari로 열기</b>를 눌러요', 'Safari에서 다시 <b>📲 앱으로 설치하기</b>를 눌러요']
+      : ['오른쪽 위 <b>⋮</b> 메뉴를 눌러요', '<b>다른 브라우저로 열기</b> (Chrome)를 눌러요', 'Chrome에서 다시 <b>📲 앱으로 설치하기</b>를 눌러요'];
+  } else if (pf.ios) {
+    steps = [
+      pf.iosChrome ? '주소창 오른쪽 <b>공유 버튼(□↑)</b>을 눌러요' : '화면 아래 가운데 <b>공유 버튼(□↑)</b>을 눌러요',
+      '메뉴를 아래로 내려 <b>홈 화면에 추가</b>를 눌러요',
+      '오른쪽 위 <b>추가</b>를 누르면 끝!',
+    ];
+  } else if (pf.samsung) {
+    steps = ['화면 아래 <b>≡ 메뉴</b>를 눌러요', '<b>현재 페이지 추가</b> → <b>홈 화면</b>을 눌러요', '<b>추가</b>를 누르면 끝!'];
+  } else if (pf.android) {
+    steps = ['오른쪽 위 <b>⋮ 메뉴</b>를 눌러요', '<b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 눌러요', '<b>설치</b>를 누르면 끝!'];
+  } else {
+    steps = ['주소창 오른쪽 <b>설치 아이콘(⊕)</b>을 눌러요', '없으면 <b>⋮ 메뉴</b> → <b>굴비 가계부 설치</b> 또는 <b>앱 → 이 사이트를 앱으로 설치</b>', '<b>설치</b>를 누르면 끝!'];
+  }
+  // 아이폰 홈 화면 앱은 사파리와 저장 공간이 따로라서, 계획을 링크로 옮겨야 한다
+  const iosCarry = pf.ios && !pf.inApp && state.plan.length;
+  const dlg = $('#modal');
+  dlg.innerHTML = `
+    <div class="mascot happy">${mascot('happy', '설치를 도와주는 굴비')}</div>
+    <h2>${esc(title)}</h2>
+    ${iosCarry ? `<div class="notice" style="margin-bottom:10px"><b>먼저 계획 링크를 복사해 두세요.</b><br>아이폰은 홈 화면 앱이 사파리와 저장 공간이 달라요. 설치한 앱을 처음 열면 <b>🔗 받은 설정 링크 붙여넣기</b>로 계획을 넣어주세요.<div style="height:8px"></div><button class="btn small gold" data-g="copy" type="button">계획 링크 복사</button></div>` : ''}
+    <ol class="guide">${steps.map(t => `<li>${t}</li>`).join('')}</ol>
+    <div class="modal-actions"><button class="btn primary block" data-g="close" type="button">알겠어요</button></div>`;
+  dlg.onclick = async e => {
+    const b = e.target.closest('[data-g]');
+    if (!b) return;
+    if (b.dataset.g === 'copy') { await copySetup(); return; }
+    dlg.close();
+  };
+  dlg.oninput = dlg.onchange = null;
+  dlg.showModal();
+}
+
+async function copySetup() {
+  if (!state.plan.length) { toast('먼저 한 달 계획을 저장해주세요'); return; }
+  const link = encodeSetup();
+  try { await navigator.clipboard.writeText(link); toast('계획 링크를 복사했어요'); }
+  catch { prompt('아래 링크를 길게 눌러 복사하세요', link); }
+}
+
+async function pasteSetup() {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); } catch { /* 권한이 없으면 직접 붙여넣기 */ }
+  if (!setupCodeOf(text)) {
+    const dlg = $('#modal');
+    text = await new Promise(resolve => {
+      dlg.innerHTML = `
+        <h2>설정 링크 붙여넣기</h2>
+        <p class="small muted" style="margin:0 0 8px">카톡 등으로 받은 굴비 가계부 링크를 길게 눌러 붙여넣어 주세요.</p>
+        <textarea class="input" id="s-link" rows="3" placeholder="https://…#setup=…"></textarea>
+        <div class="modal-actions">
+          <button class="btn primary block" data-s="ok" type="button">계획 불러오기</button>
+          <button class="btn ghost block" data-s="cancel" type="button">취소</button>
+        </div>`;
+      let val = '';
+      dlg.onclick = e => {
+        const b = e.target.closest('[data-s]');
+        if (!b) return;
+        if (b.dataset.s === 'ok') val = $('#s-link').value;
+        dlg.close();
+      };
+      dlg.oninput = dlg.onchange = null;
+      dlg.addEventListener('close', () => resolve(val), { once: true });
+      dlg.showModal();
+      $('#s-link').focus();
+    });
+  }
+  if (!text) return;
+  const code = setupCodeOf(text);
+  if (!code) { toast('설정 링크가 아니에요. 링크 전체를 붙여넣어 주세요'); return; }
+  if (await applySetup(code)) go('home');
 }
 
 /* ---------- 모달 공통 ---------- */
