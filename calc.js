@@ -13,34 +13,63 @@ export const MEMO_MAX = 100;
 export const TRASH_DAYS = 30;
 
 export const KINDS = {
-  living: '생활비(변동 예산)',
-  fixed: '고정 지출',
+  living: '생활비 (하루 한도 계산)',
+  fixed: '매달 나가는 돈',
   saving: '저축',
-  invest: '투자(안정형)',
+  invest: '투자',
 };
 
 export const TYPES = {
   expense: '지출',
-  income: '수입',
+  income: '수익',
   trip: '출장비',
-  extra: '추가 지출',
-  invest: '추가 투자',
+  extra: '큰 지출',
+  invest: '투자',
 };
 
-export const CATEGORIES = {
-  expense: ['식비', '카페·간식', '장보기', '생활용품', '쇼핑', '문화·여가', '의료', '기타'],
-  income: ['급여', '부수입', '환급', '용돈', '기타'],
-  trip: ['교통', '숙박', '식비', '기타'],
-  extra: ['경조사', '선물', '의료', '수리·교체', '기타'],
-  invest: ['지수 ETF', '채권', '예·적금', '개별 주식', '코인', '레버리지·파생'],
-};
+// 입력 화면은 월급 / 수익 / 지출 세 가지만 보여주고, 고른 아이콘에 따라 내부 유형이 정해진다
+export const EXPENSE_CATS = [
+  { k: '식비', icon: '🍚' },
+  { k: '카페·간식', icon: '☕' },
+  { k: '장보기', icon: '🛒' },
+  { k: '쇼핑', icon: '🛍️' },
+  { k: '교통', icon: '🚌' },
+  { k: '생활', icon: '🏠' },
+  { k: '병원', icon: '💊' },
+  { k: '문화·여가', icon: '🎬' },
+  { k: '경조사', icon: '🎁', type: 'extra', hint: '경조사는 하루 한도와 따로 계산해요' },
+  { k: '큰 지출', icon: '📦', type: 'extra', hint: '가전·수리처럼 가끔 큰 돈은 하루 한도와 따로 계산해요' },
+  { k: '출장비', icon: '💼', type: 'trip', hint: '회사에서 돌려받을 돈으로 따로 모아둘게요' },
+  { k: '투자', icon: '📈', type: 'invest', hint: '계획에 없던 투자예요. 저장하기 전에 굴비가 한 번 말려요' },
+  { k: '기타', icon: '✏️' },
+];
+export const INCOME_CATS = [
+  { k: '부수입', icon: '💵' },
+  { k: '용돈', icon: '🧧' },
+  { k: '환급', icon: '↩️' },
+  { k: '이자·배당', icon: '🏦' },
+  { k: '기타', icon: '✏️' },
+];
+export const SALARY_CAT = '월급';
+export const INVEST_KINDS = ['지수 ETF', '예·적금', '채권', '개별 주식', '코인', '레버리지'];
 
-// 안정형 투자 원칙: 이 분류나 메모 키워드가 나오면 강한 경고
-export const RISKY_CATEGORIES = ['개별 주식', '코인', '레버리지·파생'];
+export const typeOfExpenseCat = k => EXPENSE_CATS.find(c => c.k === k)?.type || 'expense';
+
+export function iconOf(e) {
+  if (e.type === 'fixed') return '📌';
+  if (e.type === 'nospend') return '✨';
+  if (e.type === 'income') return e.category === SALARY_CAT ? '💰' : (INCOME_CATS.find(c => c.k === e.category)?.icon || '💵');
+  if (e.type === 'invest') return '📈';
+  if (e.type === 'trip') return '💼';
+  return EXPENSE_CATS.find(c => c.k === e.category)?.icon || '✏️';
+}
+
+// 안정형 투자 원칙: 이 종류나 메모 키워드가 나오면 강한 경고
+export const RISKY_CATEGORIES = ['개별 주식', '코인', '레버리지', '레버리지·파생'];
 export const RISKY_WORDS = /코인|비트|이더|레버리지|인버스|선물|옵션|테마|단타|급등|몰빵|대출|[23]배/;
 
-export const isRiskyInvest = (category, memo = '') =>
-  RISKY_CATEGORIES.includes(category) || RISKY_WORDS.test(memo);
+export const isRiskyInvest = (kind, memo = '') =>
+  RISKY_CATEGORIES.includes(kind) || RISKY_WORDS.test(memo);
 
 export const LEVELS = [
   { min: 0, name: '멸치', line: '아직은 멸치지만 꿈은 굴비' },
@@ -104,14 +133,18 @@ export function summarize({ plan, entries, settings }, day) {
     return { ...i, done: !!done, doneEntry: done || null };
   });
 
-  const free = settings.salary
-    ? settings.salary + income - planTotal - extra - extraInvest - overspend - receivable
-    : null;
+  // 이번 달 돈 흐름: 들어온 돈(월급+수익) − 나간 돈(지출 전부 + 체크한 자동이체 + 정산 전 출장비)
+  const inflow = income;
+  const outflow = spent + extra + extraInvest
+    + sum(inP.filter(e => e.type === 'fixed'))
+    + sum(inP.filter(e => e.type === 'trip' && !e.settled));
+  const salaryIn = inP.some(e => e.type === 'income' && e.category === SALARY_CAT);
 
   return {
     period: p, budget, planTotal, spent, remaining: budget - spent, daysLeft,
     todayLimit, todaySpent, todayLeft: todayLimit - todaySpent,
-    income, extra, extraInvest, receivable, overspend, free,
+    income, extra, extraInvest, receivable, overspend,
+    inflow, outflow, left: inflow - outflow, salaryIn,
     investPlanned, investLimit, investTotal: investPlanned + extraInvest,
     fixedItems,
   };

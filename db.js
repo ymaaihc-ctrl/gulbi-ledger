@@ -58,6 +58,7 @@ export const replaceStore = (store, values) => run([store], 'readwrite', tx => {
 export async function loadAll() {
   const [plan, entries, rewards, settingsRows] = await Promise.all(STORES.map(getAll));
   const settings = Object.fromEntries(settingsRows.map(r => [r.key, r.value]));
+  plan.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   return { plan, entries, rewards, settings };
 }
 

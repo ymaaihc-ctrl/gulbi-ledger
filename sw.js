@@ -1,5 +1,5 @@
 // 앱 파일을 캐시해 오프라인에서도 열리게 한다. 사용자 데이터는 IndexedDB에 있어 캐시와 무관하다.
-const CACHE = 'gulbi-v1';
+const CACHE = 'gulbi-v2';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'calc.js', 'db.js', 'mascot.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
@@ -24,7 +24,7 @@ self.addEventListener('fetch', e => {
       caches.open(CACHE).then(c => c.put(req, copy));
       return res;
     }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('index.html'))));
-  } else if (url.hostname.endsWith('gstatic.com') || url.hostname.endsWith('googleapis.com')) {
+  } else if (url.hostname.endsWith('gstatic.com') || url.hostname.endsWith('googleapis.com') || url.hostname === 'cdn.jsdelivr.net') {
     e.respondWith(caches.match(req).then(r => r || fetch(req).then(res => {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(req, copy));

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { summarize, computeRewards, periodOf, shiftPeriod, validateEntry, isRiskyInvest } from '../calc.js';
+import { summarize, computeRewards, periodOf, shiftPeriod, validateEntry, isRiskyInvest, typeOfExpenseCat, iconOf } from '../calc.js';
 
 const plan = [
   { id: 'p1', name: '보험료', amount: 100000, kind: 'fixed' },
@@ -33,7 +33,7 @@ assert.equal(s.daysLeft, 19);
 assert.equal(s.todayLimit, 10421);
 assert.equal(s.receivable, 147800);
 assert.equal(s.extra, 100000);
-assert.equal(s.free, null);
+assert.equal(s.salaryIn, false);
 assert.equal(s.fixedItems.length, 6);
 
 // 오늘 쓴 돈은 오늘 한도를 바꾸지 않고 남은 한도만 줄인다
@@ -46,9 +46,17 @@ s = summarize({ plan, entries: entries.map(x => x.id === 'b' ? { ...x, settled: 
 assert.equal(s.receivable, 0);
 assert.equal(s.income, 0);
 
-// 여유 자금
-s = summarize({ plan, entries, settings: { ...settings, salary: 3_200_000 } }, '2026-10-13');
-assert.equal(s.free, 3_200_000 - 1_975_000 - 100_000 - 147_800);
+// 돈 흐름: 월급 + 수익 − (지출 + 큰 지출 + 정산 전 출장비 + 체크한 자동이체)
+s = summarize({ plan, settings, entries: [...entries,
+  e('w', '2026-10-10', 'income', 3_000_000, { category: '월급' }),
+  e('x', '2026-10-11', 'income', 50_000, { category: '부수입' }),
+  e('f', '2026-10-10', 'fixed', 100_000, { planId: 'p1' }),
+] }, '2026-10-13');
+assert.equal(s.salaryIn, true);
+assert.equal(s.inflow, 3_050_000);
+assert.equal(s.outflow, 152_000 + 100_000 + 147_800 + 100_000);
+assert.equal(s.left, 3_050_000 - 499_800);
+assert.equal(s.fixedItems.find(i => i.id === 'p1').done, true);
 
 // 추가 투자 → 투자 합계가 한도를 넘음
 s = summarize({ plan, entries: [e('i', '2026-10-10', 'invest', 300000)], settings }, '2026-10-13');
@@ -85,5 +93,13 @@ assert.equal(validateEntry(e('v', '2026-10-13', 'expense', 1000)), null);
 assert.ok(isRiskyInvest('코인'));
 assert.ok(isRiskyInvest('지수 ETF', '나스닥 3배 레버리지'));
 assert.ok(!isRiskyInvest('지수 ETF', 'S&P500 적립'));
+
+// 아이콘만 고르면 내부 유형이 정해진다
+assert.equal(typeOfExpenseCat('식비'), 'expense');
+assert.equal(typeOfExpenseCat('경조사'), 'extra');
+assert.equal(typeOfExpenseCat('출장비'), 'trip');
+assert.equal(typeOfExpenseCat('투자'), 'invest');
+assert.equal(iconOf({ type: 'income', category: '월급' }), '💰');
+assert.ok(isRiskyInvest('레버리지'));
 
 console.log('calc tests passed');
