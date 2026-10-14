@@ -2,7 +2,7 @@ import * as C from './calc.js';
 import * as DB from './db.js';
 import { mascot, lineFor } from './mascot.js';
 
-const APP_VERSION = '1.1.1';
+const APP_VERSION = '1.3.0';
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
@@ -13,7 +13,7 @@ const WEEK = '일월화수목금토';
 const fmtDate = s => { const d = C.parse(s); return `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEK[d.getDay()]})`; };
 const md = s => { const d = C.parse(s); return `${d.getMonth() + 1}.${d.getDate()}`; };
 
-const DEFAULT_SETTINGS = { monthStartDay: 1, investLimit: 0, onboardedAt: null, lastBackupAt: null, persistAsked: false, tipDismissed: false };
+const DEFAULT_SETTINGS = { monthStartDay: 1, monthlyIncome: 0, theme: 'light', investLimit: 0, onboardedAt: null, lastBackupAt: null, persistAsked: false, tipDismissed: false };
 const VIEWS = ['onboarding', 'home', 'ledger', 'rewards', 'settings'];
 
 let state = { plan: [], entries: [], rewards: [], settings: { ...DEFAULT_SETTINGS } };
@@ -36,10 +36,19 @@ async function init() {
     document.querySelector('main').innerHTML = `<div class="card"><h2>저장소를 열 수 없어요</h2><p class="muted">사파리 개인정보 보호 모드이거나 저장 공간이 꺼져 있을 수 있어요. 일반 모드에서 다시 열어주세요.</p><p class="small muted">${esc(err?.message)}</p></div>`;
     return;
   }
+  applyTheme();
   bindChrome();
   await handleSetupLink();
   go(state.plan.length ? 'home' : 'onboarding');
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+function applyTheme() {
+  const t = state.settings.theme;
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('gulbi-theme', t); } catch {}
+  const dark = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  $('#meta-theme').content = dark ? '#17171a' : '#f7f6f2';
 }
 
 function bindChrome() {
@@ -58,7 +67,7 @@ function go(tab) {
   ui.tab = tab;
   if (tab === 'settings') ui.planDraft = null;
   render();
-  window.scrollTo(0, 0);
+  $('main').scrollTo(0, 0);
 }
 
 /* ---------- 설정 링크(#setup=...) : 친구 계획을 첫 실행에 넣는다. 해시는 서버로 전송되지 않는다 ---------- */
@@ -101,6 +110,7 @@ async function applySetup(code) {
     if (!ok) return false;
   }
   await savePlan(data.plan);
+  await setSetting('monthlyIncome', data.plan.reduce((a, i) => a + i.amount, 0));
   const sd = Number(data.settings.monthStartDay);
   if (sd >= 1 && sd <= 28) await setSetting('monthStartDay', sd);
   toast('월 계획을 불러왔어요. 반가워요!');
@@ -171,13 +181,13 @@ function renderOnboarding() {
     <p class="muted">천장의 굴비를 쳐다보며 아끼던 자린고비처럼.<br>계획만큼만 쓰면 굴비가 쌓여요.</p>
     <ol class="steps card">
       <li><div><b>홈 화면에 추가하기</b><br><span class="small muted">${isIOS ? '사파리 아래 공유 버튼 → ‘홈 화면에 추가’' : '브라우저 메뉴 → ‘앱 설치’ 또는 ‘홈 화면에 추가’'}. 설치해야 기록이 오래 안전하게 남아요.</span></div></li>
-      <li><div><b>한 달 계획 적기</b><br><span class="small muted">보험료, 적금, 투자, 생활비처럼 매달 나가는 돈을 적어요.</span></div></li>
-      <li><div><b>쓸 때마다 + 기록</b><br><span class="small muted">월급·수익·지출 중 하나 고르고 금액만 누르면 끝!</span></div></li>
+      <li><div><b>한 달 수입과 계획 적기</b><br><span class="small muted">한 달에 얼마 들어오는지 적고, 보험료·적금·투자 같은 정해진 돈을 빼면 남는 돈이 생활비예요.</span></div></li>
+      <li><div><b>쓸 때마다 + 기록</b><br><span class="small muted">쓴 돈을 적으면 오늘 써도 되는 생활비가 바로 계산돼요.</span></div></li>
     </ol>
     ${isStandalone() ? '' : '<button class="btn gold block" data-act="install" type="button">📲 앱으로 설치하기</button><div style="height:8px"></div>'}
     <button class="btn primary block" data-act="paste-setup" type="button">🔗 받은 설정 링크 붙여넣기</button>
     <div style="height:8px"></div>
-    <button class="btn ghost block" data-act="start-plan" type="button">한 달 계획 직접 적기</button>
+    <button class="btn ghost block" data-act="start-plan" type="button">한 달 수입·계획 적기</button>
     <div style="height:8px"></div>
     <button class="btn ghost block" data-act="import" type="button">백업 파일로 시작하기</button>
   </div>`;
@@ -201,7 +211,7 @@ function renderHome(t, s) {
     <h2>이렇게 써요 <button class="link small" data-act="dismiss-tip" type="button">알겠어요</button></h2>
     <ol>
       <li>돈을 쓰거나 받으면 아래 <b>+ 기록</b>을 눌러요</li>
-      <li><b>월급 · 수익 · 지출</b> 중 하나 고르고 금액만 누르면 끝</li>
+      <li><b>수입 · 지출</b> 중 하나 고르고 금액만 누르면 끝</li>
       <li>맨 위 숫자가 <b>오늘 써도 되는 돈</b>이에요. 지키면 다음 날 굴비가 와요</li>
     </ol>
   </div>`}
@@ -297,7 +307,7 @@ function renderLedger(t) {
 }
 
 function renderListView(p) {
-  const filters = [['all', '전체'], ['income', '월급·수익'], ['expense', '지출'], ['fixed', '자동이체'], ['extra', '큰 지출'], ['trip', '출장비'], ['trip-open', '정산 대기'], ['invest', '투자']];
+  const filters = [['all', '전체'], ['income', '수입'], ['expense', '지출'], ['fixed', '자동이체'], ['extra', '큰 지출'], ['trip', '출장비'], ['trip-open', '정산 대기'], ['invest', '투자']];
   $('#ledger-body').innerHTML = `
   <input class="search" id="ledger-search" type="search" placeholder="🔍 메모·항목·#태그 검색" value="${esc(ui.query)}" aria-label="내역 검색">
   <div class="filters" role="group" aria-label="종류 필터">${filters.map(([k, l]) => `<button class="filter" data-act="filter" data-k="${k}" aria-pressed="${ui.filter === k}" type="button">${l}</button>`).join('')}</div>
@@ -502,33 +512,55 @@ function renderRewards(t, s, rw) {
 }
 
 function renderSettings(t, s) {
-  ui.planDraft ??= state.plan.length ? state.plan.map(i => ({ ...i })) : [{ id: uid(), name: '생활비', amount: 0, kind: 'living', payDay: null }];
+  ui.planDraft ??= {
+    income: state.settings.monthlyIncome || state.plan.reduce((a, i) => a + i.amount, 0),
+    items: state.plan.filter(i => i.kind !== 'living').map(i => ({ ...i })),
+    livingId: state.plan.find(i => i.kind === 'living')?.id || uid(),
+  };
   const draft = ui.planDraft;
+  const itemsSum = () => draft.items.reduce((a, i) => a + (Number(i.amount) || 0), 0);
   const trashCount = state.entries.filter(e => e.deletedAt).length;
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const standalone = isStandalone();
 
   $('#view-settings').innerHTML = `
   <div class="card">
-    <h2>한 달 계획</h2>
-    <p class="small muted" style="margin:-6px 0 4px">매달 나가는 돈과 생활비를 적어요. 생활비로 ‘오늘 써도 되는 돈’을 계산해요.</p>
-    <div id="plan-rows">${draft.map((i, idx) => `
+    <h2>① 한 달 수입</h2>
+    <p class="small muted" style="margin:-6px 0 8px">월급 등 한 달에 들어오는 돈을 합쳐서 적어요.</p>
+    <input class="input num amount-big" id="plan-income" inputmode="numeric" value="${fmtInput(draft.income || '')}" placeholder="예: 3,000,000" aria-label="한 달 수입">
+  </div>
+
+  <div class="card">
+    <h2>② 정해진 돈 빼기</h2>
+    <p class="small muted" style="margin:-6px 0 4px">보험료, 적금, 투자처럼 매달 빠져나가는 돈을 적어요. 없으면 비워도 돼요.</p>
+    <div id="plan-rows">${draft.items.map((i, idx) => `
       <div class="plan-row" data-idx="${idx}">
         <input class="input" data-f="name" value="${esc(i.name)}" placeholder="이름 (예: 보험료)" maxlength="20" aria-label="항목 이름">
         <input class="input num" data-f="amount" value="${fmtInput(i.amount)}" placeholder="금액" inputmode="numeric" aria-label="${esc(i.name)} 금액" style="text-align:right">
         <button class="del-btn" data-act="plan-del" data-idx="${idx}" type="button" aria-label="${esc(i.name)} 삭제">×</button>
         <div class="sub">
-          <select class="input" data-f="kind" aria-label="종류">${Object.entries(C.KINDS).map(([k, l]) => `<option value="${k}" ${i.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <select class="input" data-f="kind" aria-label="종류">${Object.entries(C.KINDS).filter(([k]) => k !== 'living').map(([k, l]) => `<option value="${k}" ${i.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
           <input class="input num" data-f="payDay" value="${i.payDay ?? ''}" placeholder="빠지는 날" inputmode="numeric" aria-label="자동이체 날짜">
         </div>
       </div>`).join('')}</div>
     <button class="btn ghost block small" data-act="plan-add" type="button" style="margin:10px 0">+ 항목 추가</button>
-    <div class="plan-total num"><span>한 달 합계</span><span id="plan-total">${won(draft.reduce((a, i) => a + (Number(i.amount) || 0), 0))}</span></div>
+    <div class="plan-total num"><span>정해진 돈 합계</span><span id="plan-total"></span></div>
+  </div>
+
+  <div class="card plan-living">
+    <h2>③ 남는 돈 = 한 달 생활비</h2>
+    <p class="limit num" id="plan-living" style="margin:0"></p>
+    <p class="small muted" id="plan-living-sub" style="margin:4px 0 0"></p>
     <p class="form-error" id="plan-error"></p>
     <div class="btn-row">
       <button class="btn ghost" data-act="plan-reset" type="button">되돌리기</button>
       <button class="btn primary" data-act="plan-save" type="button">계획 저장</button>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>화면 색</h2>
+    <div class="seg3" role="group" aria-label="화면 색" style="margin:0">${[['light', '☀️ 밝게'], ['dark', '🌙 어둡게'], ['auto', '📱 기기 따라']].map(([k, l]) => `<button type="button" data-act="theme" data-k="${k}" aria-pressed="${state.settings.theme === k}">${l}</button>`).join('')}</div>
   </div>
 
   <div class="card">
@@ -574,14 +606,25 @@ function renderSettings(t, s) {
   rows.addEventListener('input', e => {
     const row = e.target.closest('.plan-row');
     if (!row) return;
-    const item = draft[Number(row.dataset.idx)];
+    const item = draft.items[Number(row.dataset.idx)];
     const f = e.target.dataset.f;
     if (f === 'amount') { e.target.value = fmtInput(e.target.value); item.amount = Number(digits(e.target.value)) || 0; }
     else if (f === 'payDay') { e.target.value = digits(e.target.value).slice(0, 2); item.payDay = Number(e.target.value) || null; }
     else item[f] = e.target.value;
-    $('#plan-total').textContent = won(draft.reduce((a, i) => a + (Number(i.amount) || 0), 0));
+    refreshPlan();
   });
-  rows.addEventListener('change', e => { if (e.target.dataset.f === 'kind') draft[Number(e.target.closest('.plan-row').dataset.idx)].kind = e.target.value; });
+  const refreshPlan = () => {
+    const left = draft.income - itemsSum();
+    $('#plan-total').textContent = won(itemsSum());
+    $('#plan-living').textContent = won(left);
+    $('#plan-living').classList.toggle('over', left < 0);
+    $('#plan-living-sub').textContent = left < 0 ? '정해진 돈이 수입보다 많아요' : draft.income ? `하루 약 ${won(Math.floor(left / 30))} 쓸 수 있어요` : '';
+    $('#plan-error').textContent = '';
+  };
+  const incomeEl = $('#plan-income');
+  incomeEl.addEventListener('input', () => { incomeEl.value = fmtInput(incomeEl.value); draft.income = Number(digits(incomeEl.value)) || 0; refreshPlan(); });
+  refreshPlan();
+  rows.addEventListener('change', e => { if (e.target.dataset.f === 'kind') draft.items[Number(e.target.closest('.plan-row').dataset.idx)].kind = e.target.value; });
 
   $('#set-start').addEventListener('change', async e => { await setSetting('monthStartDay', Number(e.target.value)); toast('한 달 시작일을 바꿨어요'); });
   const inv = $('#set-invest');
@@ -604,9 +647,10 @@ async function onAction(ev) {
     case 'install': await installApp(); break;
     case 'paste-setup': await pasteSetup(); break;
     case 'copy-setup': await copySetup(); break;
+    case 'theme': await setSetting('theme', el.dataset.k); applyTheme(); render(); break;
     case 'dismiss-tip': await setSetting('tipDismissed', true); render(); break;
     case 'show-tip': await setSetting('tipDismissed', false); go('home'); break;
-    case 'add-salary': openSheet(null, 'salary'); break;
+    case 'add-salary': openSheet(null, 'income'); break;
     case 'nospend':
       await saveEntry({ id: uid(), type: 'nospend', amount: 0, date: t, category: '무지출', memo: '', createdAt: new Date().toISOString() });
       render(); toast('무지출 도전! 자정까지 버텨봐요'); break;
@@ -638,11 +682,11 @@ async function onAction(ev) {
       if (!w || !(await confirmModal({ title: '상을 지울까요?', body: `‘${w.name}’을(를) 목록에서 지워요.`, ok: '지우기', danger: true }))) break;
       await DB.del('rewards', id); state.rewards = state.rewards.filter(r => r.id !== id); render(); break;
     }
-    case 'plan-add': ui.planDraft.push({ id: uid(), name: '', amount: 0, kind: 'fixed', payDay: null }); renderSettings(t, C.summarize(state, t)); break;
+    case 'plan-add': ui.planDraft.items.push({ id: uid(), name: '', amount: 0, kind: 'fixed', payDay: null }); renderSettings(t, C.summarize(state, t)); break;
     case 'plan-del': {
-      const item = ui.planDraft[Number(el.dataset.idx)];
+      const item = ui.planDraft.items[Number(el.dataset.idx)];
       if (item.name && !(await confirmModal({ title: `‘${item.name}’ 항목을 뺄까요?`, body: '계획 저장을 눌러야 반영돼요. 지난 기록은 그대로 남아요.', ok: '빼기', danger: true }))) break;
-      ui.planDraft.splice(Number(el.dataset.idx), 1); renderSettings(t, C.summarize(state, t)); break;
+      ui.planDraft.items.splice(Number(el.dataset.idx), 1); renderSettings(t, C.summarize(state, t)); break;
     }
     case 'plan-reset': ui.planDraft = null; renderSettings(t, C.summarize(state, t)); break;
     case 'plan-save': await onPlanSave(); break;
@@ -664,31 +708,35 @@ function clampToPeriod(payDay, p) {
 }
 
 async function onPlanSave() {
-  const draft = ui.planDraft.map(i => ({ ...i, name: (i.name || '').trim() }));
+  const d = ui.planDraft;
+  const items = d.items.map(i => ({ ...i, name: (i.name || '').trim() }));
   const err = $('#plan-error');
-  if (!draft.length) { err.textContent = '항목을 하나 이상 넣어주세요'; return; }
-  if (draft.some(i => !i.name)) { err.textContent = '이름이 빈 항목이 있어요'; return; }
-  if (draft.some(i => !Number.isInteger(i.amount) || i.amount < 0 || i.amount > C.AMOUNT_MAX)) { err.textContent = '금액은 0 ~ 1억 원으로 적어주세요'; return; }
-  if (draft.some(i => i.payDay && (i.payDay < 1 || i.payDay > 31))) { err.textContent = '빠지는 날은 1 ~ 31일이에요'; return; }
-  if (!draft.some(i => i.kind === 'living')) {
-    const ok = await confirmModal({ title: '생활비 항목이 없어요', body: '생활비 항목이 있어야 ‘오늘 써도 되는 돈’과 굴비가 계산돼요. 그래도 저장할까요?', ok: '그래도 저장' });
+  if (!(d.income > 0)) { err.textContent = '한 달 수입을 먼저 적어주세요'; return; }
+  if (d.income > C.AMOUNT_MAX) { err.textContent = '수입은 1억 원까지 적을 수 있어요'; return; }
+  if (items.some(i => !i.name)) { err.textContent = '이름이 빈 항목이 있어요'; return; }
+  if (items.some(i => !Number.isInteger(i.amount) || i.amount < 0 || i.amount > C.AMOUNT_MAX)) { err.textContent = '금액은 0 ~ 1억 원으로 적어주세요'; return; }
+  if (items.some(i => i.payDay && (i.payDay < 1 || i.payDay > 31))) { err.textContent = '빠지는 날은 1 ~ 31일이에요'; return; }
+  const living = d.income - items.reduce((a, i) => a + i.amount, 0);
+  if (living < 0) { err.textContent = '정해진 돈이 수입보다 많아요. 금액을 줄여주세요'; return; }
+  if (living === 0) {
+    const ok = await confirmModal({ title: '생활비가 0원이에요', body: '수입을 전부 정해진 돈으로 나눴어요. 그래도 저장할까요?', ok: '그래도 저장' });
     if (!ok) return;
   }
   const first = !state.plan.length;
-  await savePlan(draft);
+  await setSetting('monthlyIncome', d.income);
+  await savePlan([...items, { id: d.livingId, name: '생활비', amount: living, kind: 'living', payDay: null }]);
   ui.planDraft = null;
   toast('한 달 계획을 저장했어요');
   if (first) go('home'); else render();
 }
 
-/* ---------- 입력 시트: 월급 / 수익 / 지출 + 계산기 키패드 ---------- */
+/* ---------- 입력 시트: 수입 / 지출 + 계산기 키패드 ---------- */
 
 let sheet = null;
-const MODES = { salary: '💰 월급', income: '💵 수익', expense: '💸 지출' };
+const MODES = { income: '💵 수입', expense: '💸 지출' };
 
 function modeOf(e) {
-  if (e.type === 'income') return e.category === C.SALARY_CAT ? 'salary' : 'income';
-  return 'expense';
+  return e.type === 'income' ? 'income' : 'expense';
 }
 
 function sheetCategoryOf(e) {
@@ -710,7 +758,7 @@ function openSheet(entry = null, mode = 'expense') {
   } else {
     sheet = {
       id: uid(), editing: false, locked: false, mode,
-      category: mode === 'income' ? C.INCOME_CATS[0].k : mode === 'expense' ? C.EXPENSE_CATS[0].k : C.SALARY_CAT,
+      category: mode === 'expense' ? C.EXPENSE_CATS[0].k : C.INCOME_CATS[0].k,
       investKind: null, date: C.today(), memo: '', terms: [], cur: '',
     };
   }
@@ -744,8 +792,7 @@ function updateAmount() {
 
 function sheetHint(s) {
   if (sheet.locked) return sheet.type === 'fixed' ? '한 달 계획의 자동이체예요. 이번 달만 금액이 달랐다면 고쳐주세요.' : '무지출 데이로 표시한 날이에요.';
-  if (sheet.mode === 'salary') return '이번 달 월급을 적으면 들어온 돈·남은 돈이 계산돼요.';
-  if (sheet.mode === 'income') return '월급 말고 들어온 돈이에요. 남은 돈에 더해져요.';
+  if (sheet.mode === 'income') return sheet.category === C.SALARY_CAT ? '이번 달 월급을 적으면 들어온 돈·남은 돈이 계산돼요.' : '월급 말고 들어온 돈이에요. 남은 돈에 더해져요.';
   const cat = C.EXPENSE_CATS.find(c => c.k === sheet.category);
   return cat?.hint || `하루 한도에서 빠져요 · 오늘 남은 한도 <b class="num">${won(Math.max(0, s.todayLeft))}</b>`;
 }
@@ -756,7 +803,7 @@ function renderSheet() {
   const s = C.summarize(state, t);
   const type = sheetType();
   const nospend = sheet.locked && sheet.type === 'nospend';
-  const cats = sheet.mode === 'expense' ? C.EXPENSE_CATS : sheet.mode === 'income' ? C.INCOME_CATS : [];
+  const cats = sheet.mode === 'expense' ? C.EXPENSE_CATS : C.INCOME_CATS;
   const yesterday = C.addDays(t, -1);
 
   dlg.innerHTML = `
@@ -828,7 +875,7 @@ async function onSheetClick(ev) {
   if (act === 'close') dlg.close();
   else if (act === 'mode') {
     sheet.mode = b.dataset.k;
-    sheet.category = sheet.mode === 'income' ? C.INCOME_CATS[0].k : sheet.mode === 'expense' ? C.EXPENSE_CATS[0].k : C.SALARY_CAT;
+    sheet.category = sheet.mode === 'expense' ? C.EXPENSE_CATS[0].k : C.INCOME_CATS[0].k;
     renderSheet();
   }
   else if (act === 'cat') { sheet.category = b.dataset.k; renderSheet(); }
@@ -857,7 +904,7 @@ async function submitSheet() {
   const type = sheetType();
   const entry = {
     id: sheet.id, type, amount: sheetTotal(), date: sheet.date,
-    category: sheet.mode === 'salary' ? C.SALARY_CAT : sheet.category, memo: (sheet.memo || '').trim(),
+    category: sheet.category, memo: (sheet.memo || '').trim(),
     createdAt: original?.createdAt || now, updatedAt: now, deletedAt: null,
   };
   if (sheet.planId) entry.planId = sheet.planId;

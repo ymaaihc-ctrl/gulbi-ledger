@@ -21,13 +21,13 @@ export const KINDS = {
 
 export const TYPES = {
   expense: '지출',
-  income: '수익',
+  income: '수입',
   trip: '출장비',
   extra: '큰 지출',
   invest: '투자',
 };
 
-// 입력 화면은 월급 / 수익 / 지출 세 가지만 보여주고, 고른 아이콘에 따라 내부 유형이 정해진다
+// 입력 화면은 수입 / 지출 두 가지만 보여주고, 고른 아이콘에 따라 내부 유형이 정해진다
 export const EXPENSE_CATS = [
   { k: '식비', icon: '🍚' },
   { k: '카페·간식', icon: '☕' },
@@ -44,6 +44,7 @@ export const EXPENSE_CATS = [
   { k: '기타', icon: '✏️' },
 ];
 export const INCOME_CATS = [
+  { k: '월급', icon: '💰' },
   { k: '부수입', icon: '💵' },
   { k: '용돈', icon: '🧧' },
   { k: '환급', icon: '↩️' },

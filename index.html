@@ -5,8 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>굴비 가계부</title>
   <meta name="description" content="천장의 굴비처럼 아끼면 보상이 쌓이는 자린고비 가계부">
-  <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#17171a" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" id="meta-theme" content="#f7f6f2">
+  <script>
+    try {
+      var t = localStorage.getItem('gulbi-theme') || 'light';
+      document.documentElement.dataset.theme = t;
+      var d = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.getElementById('meta-theme').content = d ? '#17171a' : '#f7f6f2';
+    } catch (e) { document.documentElement.dataset.theme = 'light'; }
+  </script>
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="굴비 가계부">
